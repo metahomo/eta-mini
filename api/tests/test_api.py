@@ -1,7 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-# 기본 구현체(rule)의 계약: 기본 10분 + 1km당 3분 + 대기 주문 1건당 2분
+# 기대값은 AGENTS.md "API 계약"의 사장님 규칙 표에서 손으로 계산한 값이다.
+# 규칙: 기본 10분 + 1km당 3분 + 대기 주문 1건당 2분 (기본 구현체 rule 기준)
 
 
 def test_health_returns_ok_and_model_name(client: TestClient) -> None:
@@ -51,7 +52,7 @@ def test_eta_large_inputs(client: TestClient) -> None:
     """큰 입력값도 거부하지 않고 계약대로 계산한다."""
     res = client.post("/eta", json={"distance_km": 1000, "pending_orders": 10000})
     assert res.status_code == 200
-    assert res.json()["minutes"] == pytest.approx(10 + 3 * 1000 + 2 * 10000)
+    assert res.json()["minutes"] == pytest.approx(23010.0)
 
 
 @pytest.mark.parametrize(
