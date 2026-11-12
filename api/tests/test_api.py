@@ -49,10 +49,11 @@ def test_eta_zero_inputs(client: TestClient) -> None:
 
 
 def test_eta_large_inputs(client: TestClient) -> None:
-    """큰 입력값도 거부하지 않고 계약대로 계산한다."""
-    res = client.post("/eta", json={"distance_km": 1000, "pending_orders": 10000})
+    """거리 상한(20km)과 아주 많은 대기 주문도 계약대로 계산한다."""
+    # 원래 계약 표의 1000km 행은 2026-11-12 결정한 20km 상한으로 대체됐다: 10 + 60 + 20000
+    res = client.post("/eta", json={"distance_km": 20, "pending_orders": 10000})
     assert res.status_code == 200
-    assert res.json()["minutes"] == pytest.approx(23010.0)
+    assert res.json()["minutes"] == pytest.approx(20070.0)
 
 
 @pytest.mark.parametrize(
