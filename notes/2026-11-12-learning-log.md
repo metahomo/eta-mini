@@ -213,6 +213,62 @@ api/app.py의 API 테스트를 api/tests/ 경로에 작성해줘.
 - 방지: 새 프로젝트는 `uv init --no-workspace`로 만든다. 프로젝트를 모아 두는 상위 폴더를 uv 프로젝트로 만들지 않는다
 - 커밋: `.vscode/settings.json`(pytest 설정) → `73469d3`, 테스트 2개 파일 → `ca1cae9`, 머지 `3b140f2`
 
+### 9) 빠진 엣지 케이스 2차 탐색 (테스트는 추가하지 않음)
+- C 목록을 추가한 뒤(38 passed) 입력 14종을 더 보내 확인했다
+- **새로 찾은, 계약대로 동작하는데 테스트가 없는 것**: 지수 표기 숫자 `2e0` → 22, 아주 큰 주문 수 `10^30` → 2e30, 대소문자가 다른 키 `Distance_KM` → 422 (필드 누락), 응답 Content-Type이 `application/json`인지
+- **새로 찾은, 판단이 필요한 것**:
+  - `pending_orders: 2^53+1` → 정확한 값은 18014398509481996인데 응답은 1.801439850948199e16 (**float 정밀도 손실**)
+  - Content-Type 헤더 없이 JSON을 보내면 422 (클라이언트 실수에 엄격함)
+  - `/eta/`(끝에 슬래시) → 307 리다이렉트, `HEAD /health` → 405
+- 배운 점: 엣지 케이스는 한 번에 다 찾을 수 없다. 탐색할 때마다 **값의 범위 → 자료형의 한계 → 형식(키·헤더·경로)**으로 시야가 넓어졌다
+
+### 10) 사용자가 정한 입력 정책을 테스트로 → 실패 19개 보고
+- 사용자의 결정 (새 계약): 무한대·NaN → 422, 따옴표 친 숫자·true/false → 422, **거리 20km 초과 → 422**, 모르는 필드 → 422
+- 새 파일 `api/tests/test_input_policy.py` (케이스 20개). 500을 예외가 아니라 상태 코드로 비교하려고 `TestClient(app, raise_server_exceptions=False)`를 사용
+- 결과: **19 failed, 1 passed** (전체 19 failed, 39 passed). 규칙대로 **앱 코드는 고치지 않고 보고함**
+
+| 묶음 | 실제 결과 |
+|---|---|
+| NaN (거리·주문 수), `-Infinity`, 주문 수 `Infinity` | **500** |
+| 거리 `Infinity`, `1e309`, `"inf"`, `1e308` | 200 `minutes: null` |
+| `"2"`, `" 2 "`, `"3"`, `true`, `false` | 200 (형 변환) |
+| 20.001 / 21 / 1000km | 200 (상한 없음) |
+| `tip`, `Distance_KM` 같은 모르는 필드 | 200 (무시) |
+| 딱 20km → 70분 | ✅ 통과 (계수를 3.1로 바꾸는 버그를 넣으면 실패 확인) |
+
+- **500의 원인을 찾음**: `-Infinity`와 `NaN`은 검증(`ge=0`)에서 **제대로 거부된다.** 그런데 422 응답 본문에 입력값을 그대로 다시 담는데, `-inf`와 `nan`은 JSON으로 직렬화할 수 없다 → `ValueError: Out of range float values are not JSON compliant` → 500. 즉 **"오류를 보고하는 코드에서 오류가 난다"**
+- **충돌 발견**: 이미 커밋된 `test_eta_large_inputs`(1000km → 23010분)와 `AGENTS.md` 계약 표의 마지막 행이 새 20km 규칙과 모순된다 → 계약 표를 고칠 때 함께 정리해야 한다
+- 배운 점: **실패하는 테스트를 먼저 쓰는 것**(TDD의 red 단계)은 결정된 계약을 기록하는 방법이다. 앱을 고치면 이 테스트가 통과하는지로 수정이 끝났는지 판단할 수 있다
+
+### 11) 앱 코드 수정 → 58 passed (red → green)
+- 사용자가 명시적으로 요청해서 이번에는 앱 코드를 고쳤다 (`api/app.py`)
+  ```python
+  model_config = ConfigDict(strict=True, extra="forbid", allow_inf_nan=False)
+  distance_km: float = Field(ge=0, le=MAX_DISTANCE_KM)  # MAX_DISTANCE_KM = 20
+  ```
+  - 추가로 `RequestValidationError` 핸들러를 둠: 422 본문의 입력값에 있는 NaN·inf를 문자열(`"nan"`)로 바꿔 직렬화 오류(500)를 막는다
+- 검증 설정만으로는 NaN이 해결되지 않는다는 점이 핵심 — **검증은 이미 성공하고 있었고, 오류 응답을 만드는 단계에서 실패하고 있었다**
+- 기존 `test_eta_large_inputs`(1000km → 23010)가 새 20km 상한 때문에 실패 → **계약이 바뀌었으므로** 20km + 주문 10000건 → 20070분으로 기대값을 바꿈 (테스트를 통과시키려고 값을 맞춘 것이 아니라 계약 변경을 반영한 것)
+- 결과: **58 passed**
+
+**일부러 버그 넣기 (수정한 각 부분이 정말 필요한지 확인)**
+| 되돌린 부분 | 실패 |
+|---|---|
+| `strict=True` 제거 | 6 (따옴표 친 숫자·불리언) |
+| 422 핸들러의 `_json_safe` 제거 | 6 (무한대·NaN 중 JSON으로 직렬화할 수 없는 값) |
+| 상한 20 → 21 | 2 (20.001, 21) |
+
+- 부수 효과: 주문 수 `2.0`이 이제 422 (strict int). 주문 수 400자리 정수는 **여전히 500** (strict int는 큰 정수를 받아들이고, 계산할 때 float으로 넘친다) — 다음 할 일
+- 배운 점: 수정을 한 줄씩 되돌려 보면 **수정한 줄마다 그것을 지키는 테스트가 있는지** 확인할 수 있다
+
+### 12) Docker 이미지 빌드
+- 증상: `docker build -f api/Dockerfile -t eta-api .` → `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine ... The system cannot find the file specified`
+- 원인: **Docker Desktop이 실행 중이 아니었다** (`docker-desktop` WSL 배포판 `Stopped`, `com.docker.service` Stopped). docker CLI는 엔진에 파이프로 연결하는 클라이언트일 뿐이다
+- 해결: Docker Desktop 실행 → `docker info`로 엔진 준비 확인(29.9.2) → 빌드 성공 (이미지 255MB)
+- 컨테이너 스모크 테스트: `/health` → ok, `/eta (2,3)` → 22.0, 21km → 422, NaN → 422 ✅ (오늘 고친 동작이 이미지에도 반영됨)
+- **발견**: `api/.dockerignore`가 **적용되지 않는다.** Docker는 `.dockerignore`를 **빌드 컨텍스트 루트**(`.`) 또는 `<Dockerfile 경로>.dockerignore`(`api/Dockerfile.dockerignore`)에서만 찾는다 → 이미지에 `__pycache__`, `tests/`, `Dockerfile`, `.dockerignore`가 들어감
+  - 해결 방법: 파일을 루트의 `.dockerignore`로 옮기거나 `api/Dockerfile.dockerignore`로 이름을 바꾼다. `api/tests`도 제외 목록에 추가한다
+
 ## 3. 핵심 개념 정리
 <!-- 용어 — 한 줄 설명 — 이 프로젝트에서 어디에 쓰였나 -->
 - **계약 테스트 (contract test)** — 구현이 아니라 외부와 약속한 입출력(상태 코드, 응답 형식, 값)을 확인하는 테스트 — `/health`, `/eta`
