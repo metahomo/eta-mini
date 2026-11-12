@@ -62,6 +62,9 @@ def test_eta_large_inputs(client: TestClient) -> None:
         {"distance_km": 1, "pending_orders": "many"},
         {"distance_km": -0.1, "pending_orders": 1},
         {"distance_km": 1, "pending_orders": -1},
+        {"distance_km": None, "pending_orders": 1},
+        {"distance_km": 1, "pending_orders": None},
+        {"distance_km": 1, "pending_orders": 1.5},
         {"distance_km": 1},
         {"pending_orders": 1},
         {},
@@ -71,12 +74,30 @@ def test_eta_large_inputs(client: TestClient) -> None:
         "orders-not-number",
         "distance-negative",
         "orders-negative",
+        "distance-null",
+        "orders-null",
+        "orders-not-integer",
         "missing-orders",
         "missing-distance",
         "empty-body",
     ],
 )
 def test_eta_invalid_input_returns_422(client: TestClient, payload: dict) -> None:
-    """숫자가 아니거나 음수이거나 빠진 필드는 422 로 거부된다."""
+    """숫자가 아니거나 음수이거나 정수가 아니거나 빠진 필드는 422 로 거부된다."""
     res = client.post("/eta", json=payload)
     assert res.status_code == 422
+
+
+def test_eta_non_json_body_returns_422(client: TestClient) -> None:
+    """JSON 이 아닌 본문은 422 로 거부된다."""
+    res = client.post(
+        "/eta", content="not json", headers={"content-type": "application/json"}
+    )
+    assert res.status_code == 422
+
+
+def test_eta_model_matches_health(client: TestClient) -> None:
+    """/eta 의 model 은 /health 가 알려 주는 구현체 이름과 같다."""
+    health_model = client.get("/health").json()["model"]
+    res = client.post("/eta", json={"distance_km": 1, "pending_orders": 1})
+    assert res.json()["model"] == health_model
