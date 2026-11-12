@@ -65,6 +65,15 @@ def test_eta_large_inputs(client: TestClient) -> None:
         {"distance_km": None, "pending_orders": 1},
         {"distance_km": 1, "pending_orders": None},
         {"distance_km": 1, "pending_orders": 1.5},
+        {"distance_km": -0.01, "pending_orders": 1},
+        {"distance_km": "", "pending_orders": 1},
+        {"distance_km": [1], "pending_orders": 1},
+        {"distance_km": {"km": 1}, "pending_orders": 1},
+        {"distance_km": 1, "pending_orders": ""},
+        {"distance_km": 1, "pending_orders": [1]},
+        {"distance_km": 1, "pending_orders": {"n": 1}},
+        {"distance_km": "NaN", "pending_orders": 1},
+        {"distance_km": 1, "pending_orders": "1e2"},
         {"distance_km": 1},
         {"pending_orders": 1},
         {},
@@ -77,6 +86,15 @@ def test_eta_large_inputs(client: TestClient) -> None:
         "distance-null",
         "orders-null",
         "orders-not-integer",
+        "distance-small-negative",
+        "distance-empty-string",
+        "distance-array",
+        "distance-object",
+        "orders-empty-string",
+        "orders-array",
+        "orders-object",
+        "distance-nan-string",
+        "orders-exponent-string",
         "missing-orders",
         "missing-distance",
         "empty-body",
@@ -94,6 +112,44 @@ def test_eta_non_json_body_returns_422(client: TestClient) -> None:
         "/eta", content="not json", headers={"content-type": "application/json"}
     )
     assert res.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["[1, 2]", "null", ""],
+    ids=["json-array", "json-null", "empty"],
+)
+def test_eta_body_not_object_returns_422(client: TestClient, body: str) -> None:
+    """본문이 객체가 아니거나(배열, null) 비어 있으면 422 로 거부된다."""
+    res = client.post(
+        "/eta", content=body, headers={"content-type": "application/json"}
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("GET", "/eta"), ("POST", "/health")],
+    ids=["get-eta", "post-health"],
+)
+def test_wrong_method_returns_405(client: TestClient, method: str, path: str) -> None:
+    """계약에 없는 메서드로 부르면 405 를 돌려준다."""
+    res = client.request(method, path)
+    assert res.status_code == 405
+
+
+def test_eta_each_pending_order_adds_two_minutes(client: TestClient) -> None:
+    """같은 거리에서 대기 주문이 1건 늘면 예상 시간이 정확히 2분 늘어난다."""
+    base = client.post("/eta", json={"distance_km": 2, "pending_orders": 3})
+    more = client.post("/eta", json={"distance_km": 2, "pending_orders": 4})
+    assert more.json()["minutes"] - base.json()["minutes"] == pytest.approx(2.0)
+
+
+def test_eta_each_km_adds_three_minutes(client: TestClient) -> None:
+    """같은 대기 주문 수에서 거리가 1km 늘면 예상 시간이 정확히 3분 늘어난다."""
+    base = client.post("/eta", json={"distance_km": 2, "pending_orders": 3})
+    more = client.post("/eta", json={"distance_km": 3, "pending_orders": 3})
+    assert more.json()["minutes"] - base.json()["minutes"] == pytest.approx(3.0)
 
 
 def test_eta_model_matches_health(client: TestClient) -> None:
