@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+
+# 학습용 HTML 테크노트는 절대 커밋·푸시하지 않는다
+notes/*.html
