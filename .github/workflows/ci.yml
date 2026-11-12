@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest # 윈도우/macOS도 지원하지만 비용 UP
+    runs-on: ubuntu-24.04 # 윈도우/macOS도 지원하지만 비용 UP
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -22,7 +22,7 @@ jobs:
   image: # ── 배포: 테스트를 통과하면 이미지 빌드·푸시 ────────
     needs: test
     if: startsWith(github.ref, 'refs/tags/v') # v 로 시작하는 태그를 푸시했을 때만 이미지 배포
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - name: 이미지 이름 (소문자)
