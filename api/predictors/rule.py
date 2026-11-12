@@ -7,4 +7,4 @@ def estimate_delivery_minutes(distance_km: float, pending_orders: int) -> float:
  Returns:
  예상 시간(분) = 기본 10분 + 1km당 3분 + 대기 주문 1건당 2분.
  """
- return 10.0 + 3.0 * distance_km + 2.0 * pending_orders
+ return 10.0 + 3.0 * distance_km + 3.0 * pending_orders
