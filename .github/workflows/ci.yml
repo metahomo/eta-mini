@@ -38,6 +38,8 @@ jobs:
           context: .
           file: api/Dockerfile
           push: true
+          provenance: false # 단일 플랫폼 매니페스트만 푸시 (attestation 이 붙은 OCI index 를 거부하는 배포 플랫폼 대응)
+          sbom: false
           build-args: MODEL_IMPL=rule
           tags: |
             ${{ env.IMAGE }}/eta-api:${{ github.ref_name }}
